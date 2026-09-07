@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+db.sqlite3
+.venv/
+venv/
+render/
+artifacts.zip
+.idea/
+.vscode/
+.DS_Store

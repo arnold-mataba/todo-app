@@ -1,0 +1,102 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Django system checks and tests
+        run: |
+          python manage.py check
+          python manage.py test
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.APP_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Image is built (not yet pushed) so IMAGE_URI is known and the S3 deploy artifact can be
+      # rendered and uploaded first. The push happens last, deliberately: it's what fires the
+      # EventBridge rule that starts CodePipeline, and the pipeline's S3 source must already
+      # contain the artifact matching this build — pushing before uploading would let the
+      # pipeline run against yesterday's taskdef.json.
+      - name: Build image (immutable git-SHA tag)
+        id: image
+        env:
+          ECR_REPOSITORY_URI: ${{ secrets.ECR_REPOSITORY_URI }}
+        run: |
+          IMAGE_URI="${ECR_REPOSITORY_URI}:${GITHUB_SHA}"
+          docker build -t "$IMAGE_URI" .
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Render taskdef.json and appspec.yaml
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          TASK_FAMILY: ${{ vars.TASK_FAMILY }}
+          EXECUTION_ROLE_ARN: ${{ secrets.TASK_EXECUTION_ROLE_ARN }}
+          TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
+          DB_PROXY_ENDPOINT: ${{ secrets.DB_PROXY_ENDPOINT }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          DB_SECRET_ARN: ${{ secrets.DB_SECRET_ARN }}
+          DJANGO_SECRET_KEY_ARN: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ vars.REDIS_PORT }}
+          LOG_GROUP_NAME: ${{ secrets.LOG_GROUP_NAME }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          mkdir -p render
+          sed \
+            -e "s#__TASK_FAMILY__#${TASK_FAMILY}#g" \
+            -e "s#__IMAGE_URI__#${IMAGE_URI}#g" \
+            -e "s#__EXECUTION_ROLE_ARN__#${EXECUTION_ROLE_ARN}#g" \
+            -e "s#__TASK_ROLE_ARN__#${TASK_ROLE_ARN}#g" \
+            -e "s#__DB_PROXY_ENDPOINT__#${DB_PROXY_ENDPOINT}#g" \
+            -e "s#__DB_NAME__#${DB_NAME}#g" \
+            -e "s#__DB_SECRET_ARN__#${DB_SECRET_ARN}#g" \
+            -e "s#__DJANGO_SECRET_KEY_ARN__#${DJANGO_SECRET_KEY_ARN}#g" \
+            -e "s#__REDIS_HOST__#${REDIS_HOST}#g" \
+            -e "s#__REDIS_PORT__#${REDIS_PORT}#g" \
+            -e "s#__LOG_GROUP_NAME__#${LOG_GROUP_NAME}#g" \
+            -e "s#__AWS_REGION__#${AWS_REGION}#g" \
+            taskdef.json > render/taskdef.json
+          cp appspec.yaml render/appspec.yaml
+
+      - name: Zip deploy artifact
+        run: |
+          cd render
+          zip -j ../artifacts.zip taskdef.json appspec.yaml
+
+      - name: Upload deploy artifact to S3
+        env:
+          ARTIFACT_BUCKET_NAME: ${{ secrets.ARTIFACT_BUCKET_NAME }}
+        run: |
+          aws s3 cp artifacts.zip "s3://${ARTIFACT_BUCKET_NAME}/deploy-artifacts/artifacts.zip"
+
+      - name: Push image (triggers EventBridge -> CodePipeline)
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+        run: docker push "$IMAGE_URI"

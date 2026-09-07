@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+db.sqlite3
+.git/
+.github/
+.venv/
+venv/
+render/
+artifacts.zip
+*.md
+.idea/
+.vscode/
