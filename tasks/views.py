@@ -12,8 +12,6 @@ from .services import get_all_tasks, invalidate_tasks_cache
 
 
 class TaskViewSet(viewsets.ModelViewSet):
-    """DRF API at /api/tasks/ — reads via the shared cache-aside helper, writes evict it."""
-
     serializer_class = TaskSerializer
     queryset = Task.objects.all()
 
@@ -35,7 +33,6 @@ class TaskViewSet(viewsets.ModelViewSet):
 
 
 def task_list(request):
-    """Server-rendered UI: create/view/update/delete tasks via plain HTML forms."""
     return render(request, "tasks/list.html", {"tasks": get_all_tasks()})
 
 
@@ -65,7 +62,6 @@ def task_delete(request, pk):
 
 
 def health(request):
-    """Container + ALB health check: verifies both backends the app depends on are reachable."""
     try:
         connection.ensure_connection()
         cache.set("health:check", "ok", 5)

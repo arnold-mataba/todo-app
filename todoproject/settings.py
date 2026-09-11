@@ -1,13 +1,3 @@
-"""
-Django settings for todoproject.
-
-Runtime config (DB/cache/secret) comes entirely from environment variables injected by the ECS
-task definition (see todo-infra/templates/ecs.yaml) — DB_PROXY_ENDPOINT/DB_PORT/DB_NAME/
-DB_USERNAME/DB_PASSWORD for RDS via RDS Proxy, REDIS_HOST/REDIS_PORT for ElastiCache, and
-DJANGO_SECRET_KEY from a dedicated Secrets Manager secret. Local dev falls back to sqlite/no
-cache — see README "Local development".
-"""
-
 import os
 from pathlib import Path
 
@@ -17,7 +7,6 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key-do-not-u
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 
-# The ALB is the real network boundary in front of this app; '*' is fine for a lab.
 ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
@@ -61,7 +50,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "todoproject.wsgi.application"
 
-# Database — Postgres through RDS Proxy in ECS; sqlite locally when DB_PROXY_ENDPOINT is unset.
 if os.environ.get("DB_PROXY_ENDPOINT"):
     DATABASES = {
         "default": {
@@ -71,7 +59,6 @@ if os.environ.get("DB_PROXY_ENDPOINT"):
             "NAME": os.environ.get("DB_NAME", "tododb"),
             "USER": os.environ.get("DB_USERNAME", "postgres"),
             "PASSWORD": os.environ.get("DB_PASSWORD", ""),
-            # RDS Proxy pools connections itself; keep the app-side pool small.
             "CONN_MAX_AGE": 0,
         }
     }
@@ -83,8 +70,6 @@ else:
         }
     }
 
-# Cache — Redis (cache-aside reads, see tasks/services.py) via ElastiCache; local in-memory
-# fallback when REDIS_HOST is unset, so `manage.py runserver` works without a Redis instance.
 if os.environ.get("REDIS_HOST"):
     redis_port = os.environ.get("REDIS_PORT", "6379")
     CACHES = {

@@ -1,9 +1,3 @@
-"""
-Cache-aside on top of RDS Proxy, shared by the DRF API and the template views so both paths
-demonstrate the same read/write split: reads try Redis first (django-redis, CACHES in
-settings.py), writes go straight to Postgres through RDS Proxy and evict the cache.
-"""
-
 from django.core.cache import cache
 
 from .models import Task

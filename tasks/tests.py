@@ -7,11 +7,6 @@ from .services import TASKS_CACHE_KEY, get_all_tasks, invalidate_tasks_cache
 
 
 class CacheClearingTestCase(TestCase):
-    """
-    Django's TestCase rolls back the DB transaction between tests but never touches the cache
-    backend — a stale tasks:all entry from one test would otherwise leak into the next.
-    """
-
     def setUp(self):
         cache.clear()
 

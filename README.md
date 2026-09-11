@@ -7,8 +7,9 @@ Django + Django REST Framework To-Do app: reads go through Redis (django-redis, 
 data is also exposed as a DRF API under `/api/tasks/`.
 
 Deploys as a container to ECS Fargate via `todo-infra`'s pipeline: this repo's workflow builds
-the image, pushes it to ECR (which fires the EventBridge rule that starts CodePipeline), and
-uploads the rendered `taskdef.json` + `appspec.yaml` to S3 for CodeDeploy's blue/green shift.
+the image, registers the real ECS task definition directly (via `jq`, not a checked-in template
+file), uploads it with `appspec.yaml` to S3 for CodeDeploy's blue/green shift, then pushes the
+image to ECR — which fires the EventBridge rule that starts CodePipeline.
 
 ## Local development
 
@@ -45,28 +46,39 @@ fine because blue/green replaces one task set at a time, but a genuinely concurr
 from multiple tasks starting at once (e.g. autoscaling right after a deploy) isn't fully guarded
 against. A production setup would run migrations as a one-off CodeDeploy lifecycle hook instead.
 
+## No checked-in task-definition template
+
+There's no `taskdef.json` in this repo. `build-and-deploy.yml`'s "Generate real taskdef.json"
+step builds the complete, real ECS task definition with `jq` on every run — the image URI is
+freshly known, and everything else (execution/task role ARNs, the log group name, the SSM
+parameter paths for DB/Redis config) is derived from the `ENVIRONMENT_NAME` naming convention
+shared with `todo-infra`'s templates, not copied in as GitHub secrets. Only the two *real*
+secrets (DB credentials, Django's secret key) come from GitHub secrets, since their ARNs include
+an unpredictable Secrets-Manager-generated suffix. This avoids keeping a template file with
+placeholder tokens that a substitution pass could silently get out of sync with.
+
 ## Required GitHub repo configuration
 
 Values come from `todo-infra`'s root stack output (`aws cloudformation describe-stacks
 --stack-name todo-dev-root --query "Stacks[0].Outputs"`) — see `todo-infra/README.md`.
 
-**Secrets** (ARNs / internal hostnames — masked, per best practice):
-`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI`, `ARTIFACT_BUCKET_NAME`, `TASK_EXECUTION_ROLE_ARN`,
-`TASK_ROLE_ARN`, `DB_SECRET_ARN`, `DB_PROXY_ENDPOINT`, `DJANGO_SECRET_KEY_ARN`, `REDIS_HOST`,
-`LOG_GROUP_NAME`
+**Secrets** (real ARNs — masked, per best practice; note how short this list is now that
+non-secret config is resolved by naming convention / SSM Parameter Store instead of being
+copied through GitHub):
+`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI`, `ARTIFACT_BUCKET_NAME`, `DB_SECRET_ARN`,
+`DJANGO_SECRET_KEY_ARN`
 
-**Variables** (non-identifying config): `AWS_REGION`, `DB_NAME`, `REDIS_PORT`, `TASK_FAMILY`
-(e.g. `todo-dev-todo-app`, must match the `ecs` child stack's task definition family)
+**Variables**: `AWS_REGION`, `ENVIRONMENT_NAME` (must exactly match the value used to deploy
+`todo-infra` — everything computed by naming convention depends on this matching)
 
 Note `DJANGO_SECRET_KEY` itself is never a GitHub secret — it's generated and stored in Secrets
 Manager by the `ecs` child stack (`ecs.yaml`'s `DjangoSecretKeySecret`), and injected into the
-container directly by ECS. `DJANGO_SECRET_KEY_ARN` here is just the pointer to that secret, used
-to fill in `taskdef.json`'s `secrets` entry.
+container directly by ECS. `DJANGO_SECRET_KEY_ARN` here is just the pointer to that secret.
 
 ## Why the image push happens last in the workflow
 
-The workflow builds the image, computes its URI, renders `taskdef.json`/`appspec.yaml`, zips
-and uploads them to the fixed S3 key CodePipeline's source action watches — and only then pushes
-the image to ECR. The push is what fires EventBridge → CodePipeline, so the S3 artifact has to
-already reflect this build before that happens; pushing first would risk the pipeline picking up
-last build's `taskdef.json`.
+The workflow builds the image, computes its URI, generates the real `taskdef.json` + copies
+`appspec.yaml`, zips and uploads them to the fixed S3 key CodePipeline's source action watches —
+and only then pushes the image to ECR. The push is what fires EventBridge → CodePipeline, so the
+S3 artifact has to already reflect this build before that happens; pushing first would risk the
+pipeline picking up the previous build's task definition.
