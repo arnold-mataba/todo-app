@@ -40,8 +40,9 @@ Run tests with `python manage.py test`.
 
 ## Migrations run once, before traffic shifts — not in the container
 
-`entrypoint.sh` no longer runs `manage.py migrate` — it only execs gunicorn. Migrations run in
-`todo-infra`'s pipeline instead, in a dedicated **Migrate** stage between Source and Deploy: a
+The container no longer runs `manage.py migrate` on startup — the Dockerfile's `CMD` execs
+gunicorn directly, no entrypoint script needed. Migrations run in `todo-infra`'s pipeline
+instead, in a dedicated **Migrate** stage between Source and Deploy: a
 CodeBuild action registers the incoming `taskdef.json` and runs it once as a standalone
 `ecs run-task` with the container command overridden to `manage.py migrate --noinput`. If that
 task doesn't exit 0, the CodeBuild action fails and CodeDeploy's blue/green shift never runs.
