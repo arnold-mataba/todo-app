@@ -50,8 +50,7 @@ jobs:
           docker build -t "$IMAGE_URI" .
           echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
-      - name: Generate real taskdef.json
-        id: taskdef
+      - name: Render taskdef.json from deploy/taskdef.template.json
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
           ENVIRONMENT_NAME: ${{ vars.ENVIRONMENT_NAME }}
@@ -60,59 +59,10 @@ jobs:
           DJANGO_SECRET_KEY_ARN: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ENVIRONMENT_NAME}-ecs-task-execution-role"
-          TASK_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ENVIRONMENT_NAME}-ecs-task-role"
-          LOG_GROUP="/ecs/${ENVIRONMENT_NAME}-todo-app"
-          SSM_PREFIX="arn:aws:ssm:${AWS_REGION}:${ACCOUNT_ID}:parameter/${ENVIRONMENT_NAME}"
-
+          export ACCOUNT_ID
           mkdir -p render
-          jq -n \
-            --arg family "${ENVIRONMENT_NAME}-todo-app" \
-            --arg image "$IMAGE_URI" \
-            --arg execRoleArn "$EXEC_ROLE_ARN" \
-            --arg taskRoleArn "$TASK_ROLE_ARN" \
-            --arg dbSecretArn "$DB_SECRET_ARN" \
-            --arg djangoSecretArn "$DJANGO_SECRET_KEY_ARN" \
-            --arg dbProxyArn "${SSM_PREFIX}/db-proxy-endpoint" \
-            --arg dbPortArn "${SSM_PREFIX}/db-port" \
-            --arg dbNameArn "${SSM_PREFIX}/db-name" \
-            --arg redisHostArn "${SSM_PREFIX}/redis-host" \
-            --arg redisPortArn "${SSM_PREFIX}/redis-port" \
-            --arg logGroup "$LOG_GROUP" \
-            --arg region "$AWS_REGION" \
-            '{
-              family: $family,
-              requiresCompatibilities: ["FARGATE"],
-              networkMode: "awsvpc",
-              cpu: "512",
-              memory: "1024",
-              executionRoleArn: $execRoleArn,
-              taskRoleArn: $taskRoleArn,
-              containerDefinitions: [{
-                name: "todo-app",
-                image: $image,
-                portMappings: [{containerPort: 8080, protocol: "tcp"}],
-                secrets: [
-                  {name: "DB_USERNAME", valueFrom: ($dbSecretArn + ":username::")},
-                  {name: "DB_PASSWORD", valueFrom: ($dbSecretArn + ":password::")},
-                  {name: "DJANGO_SECRET_KEY", valueFrom: $djangoSecretArn},
-                  {name: "DB_PROXY_ENDPOINT", valueFrom: $dbProxyArn},
-                  {name: "DB_PORT", valueFrom: $dbPortArn},
-                  {name: "DB_NAME", valueFrom: $dbNameArn},
-                  {name: "REDIS_HOST", valueFrom: $redisHostArn},
-                  {name: "REDIS_PORT", valueFrom: $redisPortArn}
-                ],
-                logConfiguration: {
-                  logDriver: "awslogs",
-                  options: {
-                    "awslogs-group": $logGroup,
-                    "awslogs-region": $region,
-                    "awslogs-stream-prefix": "todo-app"
-                  }
-                }
-              }]
-            }' > render/taskdef.json
-          cp appspec.yaml render/appspec.yaml
+          envsubst < deploy/taskdef.template.json > render/taskdef.json
+          cp deploy/appspec.yaml render/appspec.yaml
 
       - name: Zip deploy artifact
         run: |

@@ -7,9 +7,9 @@ Django + Django REST Framework To-Do app: reads go through Redis (django-redis, 
 data is also exposed as a DRF API under `/api/tasks/`.
 
 Deploys as a container to ECS Fargate via `todo-infra`'s pipeline: this repo's workflow builds
-the image, registers the real ECS task definition directly (via `jq`, not a checked-in template
-file), uploads it with `appspec.yaml` to S3 for CodeDeploy's blue/green shift, then pushes the
-image to ECR — which fires the EventBridge rule that starts CodePipeline.
+the image, renders `deploy/taskdef.template.json` into a real task definition, uploads it with
+`deploy/appspec.yaml` to S3 for CodeDeploy's blue/green shift, then pushes the image to ECR —
+which fires the EventBridge rule that starts CodePipeline.
 
 ## Local development
 
@@ -59,16 +59,18 @@ after installing dependencies. It exits non-zero if a model changed without a ma
 file being committed, so a forgotten `makemigrations` fails the workflow immediately — before
 `check`/`test` run, before the image builds, before anything touches AWS.
 
-## No checked-in task-definition template
+## `deploy/` — the actual task definition and appspec, checked in and readable
 
-There's no `taskdef.json` in this repo. `build-and-deploy.yml`'s "Generate real taskdef.json"
-step builds the complete, real ECS task definition with `jq` on every run — the image URI is
-freshly known, and everything else (execution/task role ARNs, the log group name, the SSM
-parameter paths for DB/Redis config) is derived from the `ENVIRONMENT_NAME` naming convention
-shared with `todo-infra`'s templates, not copied in as GitHub secrets. Only the two *real*
-secrets (DB credentials, Django's secret key) come from GitHub secrets, since their ARNs include
-an unpredictable Secrets-Manager-generated suffix. This avoids keeping a template file with
-placeholder tokens that a substitution pass could silently get out of sync with.
+`deploy/taskdef.template.json` and `deploy/appspec.yaml` are real, complete, checked-in files —
+open either one and see exactly what gets deployed, no JSON assembled inline in workflow YAML.
+The workflow's only job is a single `envsubst` render step: `${IMAGE_URI}`, `${ACCOUNT_ID}`,
+`${ENVIRONMENT_NAME}`, `${AWS_REGION}`, `${DB_SECRET_ARN}` and `${DJANGO_SECRET_KEY_ARN}` are the
+only placeholders, filled from values already known at build time (the image just built, the
+account/region the workflow is running in) or derived from the `ENVIRONMENT_NAME` naming
+convention shared with `todo-infra`'s templates (execution/task role ARNs, the log group name,
+the SSM parameter paths for DB/Redis config) — none of that is copied in as GitHub secrets. Only
+the two *real* secrets (DB credentials, Django's secret key) come from GitHub secrets, since
+their ARNs include an unpredictable Secrets-Manager-generated suffix.
 
 ## Required GitHub repo configuration
 
@@ -95,8 +97,9 @@ container directly by ECS. `DJANGO_SECRET_KEY_ARN` here is just the pointer to t
 
 ## Why the image push happens last in the workflow
 
-The workflow builds the image, computes its URI, generates the real `taskdef.json` + copies
-`appspec.yaml`, zips and uploads them to the fixed S3 key CodePipeline's source action watches —
-and only then pushes the image to ECR. The push is what fires EventBridge → CodePipeline, so the
+The workflow builds the image, computes its URI, renders `deploy/taskdef.template.json` +
+copies `deploy/appspec.yaml`, zips and uploads them to the fixed S3 key CodePipeline's source
+action watches — and only then pushes the image to ECR. The push is what fires EventBridge →
+CodePipeline, so the
 S3 artifact has to already reflect this build before that happens; pushing first would risk the
 pipeline picking up the previous build's task definition.
