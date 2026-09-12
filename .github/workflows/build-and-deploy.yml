@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run --no-input
+
       - name: Run Django system checks and tests
         run: |
           python manage.py check

@@ -38,13 +38,25 @@ python manage.py runserver
 
 Run tests with `python manage.py test`.
 
-## Container startup runs migrations
+## Migrations run once, before traffic shifts — not in the container
 
-`entrypoint.sh` runs `manage.py migrate --noinput` before starting gunicorn — there's no
-separate migration step in the deploy pipeline. This is a documented lab-scope simplification:
-fine because blue/green replaces one task set at a time, but a genuinely concurrent first-migrate
-from multiple tasks starting at once (e.g. autoscaling right after a deploy) isn't fully guarded
-against. A production setup would run migrations as a one-off CodeDeploy lifecycle hook instead.
+`entrypoint.sh` no longer runs `manage.py migrate` — it only execs gunicorn. Migrations run in
+`todo-infra`'s pipeline instead, in a dedicated **Migrate** stage between Source and Deploy: a
+CodeBuild action registers the incoming `taskdef.json` and runs it once as a standalone
+`ecs run-task` with the container command overridden to `manage.py migrate --noinput`. If that
+task doesn't exit 0, the CodeBuild action fails and CodeDeploy's blue/green shift never runs.
+
+This replaced running `migrate` from the container's own entrypoint, which raced across however
+many tasks a blue/green deploy (or autoscaling right after one) starts concurrently — every task
+would call `migrate` on startup, with no guarantee only one wins the race on the same schema
+change. See `todo-infra/README.md` for the pipeline-side detail.
+
+## Missing-migration check runs in CI, before the image is even built
+
+`build-and-deploy.yml` runs `python manage.py makemigrations --check --dry-run --no-input` right
+after installing dependencies. It exits non-zero if a model changed without a matching migration
+file being committed, so a forgotten `makemigrations` fails the workflow immediately — before
+`check`/`test` run, before the image builds, before anything touches AWS.
 
 ## No checked-in task-definition template
 
@@ -60,7 +72,7 @@ placeholder tokens that a substitution pass could silently get out of sync with.
 ## Required GitHub repo configuration
 
 Values come from two stacks in two different repos — see `todo-infra/README.md` and
-`todo-ecr/README.md`:
+`todo-bootstrap/README.md`:
 
 ```bash
 aws cloudformation describe-stacks --stack-name todo-dev-root --query "Stacks[0].Outputs"
@@ -70,7 +82,7 @@ aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].
 **Secrets** (real ARNs — masked, per best practice; note how short this list is now that
 non-secret config is resolved by naming convention / SSM Parameter Store instead of being
 copied through GitHub):
-`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI` (from `todo-ecr`'s stack, not `todo-infra`'s),
+`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI` (from `todo-bootstrap`'s stack, not `todo-infra`'s),
 `ARTIFACT_BUCKET_NAME`, `DB_SECRET_ARN`, `DJANGO_SECRET_KEY_ARN`
 
 **Variables**: `AWS_REGION`, `ENVIRONMENT_NAME` (must exactly match the value used to deploy
