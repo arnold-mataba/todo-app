@@ -41,41 +41,20 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build image (immutable git-SHA tag)
-        id: image
+      - name: Build image (mutable :latest tag)
         env:
           ECR_REPOSITORY_URI: ${{ secrets.ECR_REPOSITORY_URI }}
-        run: |
-          IMAGE_URI="${ECR_REPOSITORY_URI}:${GITHUB_SHA}"
-          docker build -t "$IMAGE_URI" .
-          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
-
-      - name: Render taskdef.json from deploy/taskdef.template.json
-        env:
-          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-          ENVIRONMENT_NAME: ${{ vars.ENVIRONMENT_NAME }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          DB_SECRET_ARN: ${{ secrets.DB_SECRET_ARN }}
-          DJANGO_SECRET_KEY_ARN: ${{ secrets.DJANGO_SECRET_KEY_ARN }}
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          export ACCOUNT_ID
-          mkdir -p render
-          envsubst < deploy/taskdef.template.json > render/taskdef.json
-          cp deploy/appspec.yaml render/appspec.yaml
+        run: docker build -t "${ECR_REPOSITORY_URI}:latest" .
 
       - name: Zip deploy artifact
-        run: |
-          cd render
-          zip -j ../artifacts.zip taskdef.json appspec.yaml
+        run: zip -j artifacts.zip deploy/taskdef.json deploy/appspec.yaml
 
       - name: Upload deploy artifact to S3
         env:
           ARTIFACT_BUCKET_NAME: ${{ secrets.ARTIFACT_BUCKET_NAME }}
-        run: |
-          aws s3 cp artifacts.zip "s3://${ARTIFACT_BUCKET_NAME}/deploy-artifacts/artifacts.zip"
+        run: aws s3 cp artifacts.zip "s3://${ARTIFACT_BUCKET_NAME}/deploy-artifacts/artifacts.zip"
 
       - name: Push image (triggers EventBridge -> CodePipeline)
         env:
-          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-        run: docker push "$IMAGE_URI"
+          ECR_REPOSITORY_URI: ${{ secrets.ECR_REPOSITORY_URI }}
+        run: docker push "${ECR_REPOSITORY_URI}:latest"
