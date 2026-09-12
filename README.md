@@ -59,14 +59,19 @@ placeholder tokens that a substitution pass could silently get out of sync with.
 
 ## Required GitHub repo configuration
 
-Values come from `todo-infra`'s root stack output (`aws cloudformation describe-stacks
---stack-name todo-dev-root --query "Stacks[0].Outputs"`) — see `todo-infra/README.md`.
+Values come from two stacks in two different repos — see `todo-infra/README.md` and
+`todo-ecr/README.md`:
+
+```bash
+aws cloudformation describe-stacks --stack-name todo-dev-root --query "Stacks[0].Outputs"
+aws cloudformation describe-stacks --stack-name todo-dev-ecr --query "Stacks[0].Outputs"  # ECR_REPOSITORY_URI
+```
 
 **Secrets** (real ARNs — masked, per best practice; note how short this list is now that
 non-secret config is resolved by naming convention / SSM Parameter Store instead of being
 copied through GitHub):
-`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI`, `ARTIFACT_BUCKET_NAME`, `DB_SECRET_ARN`,
-`DJANGO_SECRET_KEY_ARN`
+`APP_BUILD_ROLE_ARN`, `ECR_REPOSITORY_URI` (from `todo-ecr`'s stack, not `todo-infra`'s),
+`ARTIFACT_BUCKET_NAME`, `DB_SECRET_ARN`, `DJANGO_SECRET_KEY_ARN`
 
 **Variables**: `AWS_REGION`, `ENVIRONMENT_NAME` (must exactly match the value used to deploy
 `todo-infra` — everything computed by naming convention depends on this matching)
