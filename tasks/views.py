@@ -39,8 +39,9 @@ def task_list(request):
 @require_POST
 def task_create(request):
     title = request.POST.get("title", "").strip()
+    priority = request.POST.get("priority", "").strip()
     if title:
-        Task.objects.create(title=title)
+        Task.objects.create(title=title, priority=priority)
         invalidate_tasks_cache()
     return redirect("task_list")
 
