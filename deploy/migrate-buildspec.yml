@@ -1,0 +1,24 @@
+version: 0.2
+phases:
+  install:
+    commands:
+      - yum install -y jq
+  build:
+    commands:
+      - echo "Registering task definition revision from taskdef.json for the migration run"
+      - TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://taskdef.json --query "taskDefinition.taskDefinitionArn" --output text)
+      - CONTAINER_NAME=$(jq -r '.containerDefinitions[0].name' taskdef.json)
+      - echo "Running migrate as a one-off task on $TASK_DEF_ARN"
+      - >
+        TASK_ARN=$(aws ecs run-task
+        --cluster "$CLUSTER_NAME"
+        --task-definition "$TASK_DEF_ARN"
+        --launch-type FARGATE
+        --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_ECS_SUBNET_IDS],securityGroups=[$ECS_SECURITY_GROUP_ID],assignPublicIp=DISABLED}"
+        --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"python\",\"manage.py\",\"migrate\",\"--noinput\"]}]}"
+        --query "tasks[0].taskArn" --output text)
+      - echo "Waiting for migration task $TASK_ARN to stop"
+      - aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$TASK_ARN"
+      - EXIT_CODE=$(aws ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks "$TASK_ARN" --query "tasks[0].containers[0].exitCode" --output text)
+      - echo "Migration task exit code -> $EXIT_CODE"
+      - test "$EXIT_CODE" = "0"

@@ -47,7 +47,7 @@ jobs:
         run: docker build -t "${ECR_REPOSITORY_URI}:latest" .
 
       - name: Zip deploy artifact
-        run: zip -j artifacts.zip deploy/taskdef.json deploy/appspec.yaml
+        run: zip -j artifacts.zip deploy/taskdef.json deploy/appspec.yaml deploy/migrate-buildspec.yml
 
       - name: Upload deploy artifact to S3
         env:

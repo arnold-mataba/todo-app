@@ -59,12 +59,19 @@ after installing dependencies. It exits non-zero if a model changed without a ma
 file being committed, so a forgotten `makemigrations` fails the workflow immediately — before
 `check`/`test` run, before the image builds, before anything touches AWS.
 
-## `deploy/` — the actual task definition and appspec, checked in and static
+## `deploy/` — the actual task definition, appspec, and migrate buildspec, checked in and static
 
-`deploy/taskdef.json` and `deploy/appspec.yaml` are real, complete, checked-in files — open
-either one and see exactly what gets deployed. There is no template, no placeholder, no
-rendering step of any kind; the workflow just zips these two files as they are. Every value in
-`taskdef.json` is a static literal:
+`deploy/taskdef.json`, `deploy/appspec.yaml`, and `deploy/migrate-buildspec.yml` are real,
+complete, checked-in files — open any of them and see exactly what gets deployed. There is no
+template, no placeholder, no rendering step of any kind; the workflow just zips these three
+files as they are. `migrate-buildspec.yml` is what `todo-infra`'s `MigrateProject` CodeBuild
+project actually runs (`Source.BuildSpec: migrate-buildspec.yml`, a path into this same
+artifact, instead of the script being embedded as inline YAML text inside the CloudFormation
+template) — the three CFN-specific values it needs (`CLUSTER_NAME`, `PRIVATE_ECS_SUBNET_IDS`,
+`ECS_SECURITY_GROUP_ID`) arrive as plain CodeBuild environment variables, so this file itself
+has zero CloudFormation syntax in it.
+
+Every value in `taskdef.json` is a static literal:
 
 - **Image**: `<account>.dkr.ecr.<region>.amazonaws.com/todo-app:latest` — fixed, because the tag
   never changes (see "Mutable `:latest` tag" below).
@@ -111,6 +118,7 @@ copying the real generated value through GitHub.
 ## Why the image push happens last in the workflow
 
 The workflow builds the image, zips the checked-in `deploy/taskdef.json` + `deploy/appspec.yaml`
-and uploads them to the fixed S3 key CodePipeline's source action watches — and only then pushes
++ `deploy/migrate-buildspec.yml` and uploads them to the fixed S3 key CodePipeline's source
+action watches — and only then pushes
 the image to ECR. The push is what fires EventBridge → CodePipeline, so the S3 artifact has to
 already be in place before that happens.
