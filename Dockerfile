@@ -17,4 +17,4 @@ USER app
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/', timeout=3).read()" || exit 1
-CMD ["gunicorn", "todoproject.wsgi:application", "--bind", "0.0.0.0:8080", "--workers", "3"]
+CMD ["gunicorn", "todoproject.wsgi:application", "--bind", "0.0.0.0:8080", "--workers", "3", "--access-logfile", "-"]
