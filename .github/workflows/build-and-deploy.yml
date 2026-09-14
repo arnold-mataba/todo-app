@@ -12,6 +12,8 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    env:
+      DJANGO_SECRET_KEY: ci-test-run-only-not-a-real-secret
     steps:
       - uses: actions/checkout@v4
 
